@@ -57,7 +57,7 @@ class MainActivity : BaseScreen() {
         reader = BatteryReader(this)
         setContentView(buildUi())
         autoStartUpdate = intent.getBooleanExtra(Updater.EXTRA_START_UPDATE, false)
-        Updater.schedule(this)
+        runCatching { Updater.schedule(this) }   // never let the update scheduler stop the app
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
