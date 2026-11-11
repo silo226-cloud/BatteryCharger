@@ -1,6 +1,10 @@
 package com.silo.chargemonitor
 
-import android.app.Activity
+import android.Manifest
+import android.app.AlertDialog
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -29,6 +33,12 @@ class MainActivity : BaseScreen() {
     private lateinit var healthBar: MeterBar
     private lateinit var tempBar: MeterBar
     private lateinit var cableBar: MeterBar
+    private lateinit var updateCard: LinearLayout
+    private lateinit var updateTitle: TextView
+    private lateinit var updateBtn: TextView
+    private var pendingUpdate: UpdateInfo? = null
+    private var installing = false
+    private var autoStartUpdate = false
 
     // Charging-session stats (reset each time the charger is plugged in)
     private var wasCharging = false
@@ -46,9 +56,23 @@ class MainActivity : BaseScreen() {
         super.onCreate(savedInstanceState)
         reader = BatteryReader(this)
         setContentView(buildUi())
+        autoStartUpdate = intent.getBooleanExtra(Updater.EXTRA_START_UPDATE, false)
+        Updater.schedule(this)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+        }
     }
 
-    override fun onResume() { super.onResume(); handler.post(tick) }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(Updater.EXTRA_START_UPDATE, false)) autoStartUpdate = true
+    }
+
+    override fun onResume() {
+        super.onResume(); handler.post(tick)
+        checkForUpdate()
+    }
     override fun onPause() { handler.removeCallbacks(tick); super.onPause() }
 
     // ---------------------------------------------------------------- UI
@@ -67,6 +91,15 @@ class MainActivity : BaseScreen() {
         }
         header.addView(chip)
         root.addView(header)
+
+        // "New version" banner, hidden until an update is found
+        updateCard = card(0xFF7C2D12.toInt(), 0xFF9D174D.toInt()).apply {
+            visibility = View.GONE
+            updateTitle = text("", 16f, Color.WHITE, bold = true); addView(updateTitle)
+            updateBtn = button("⬇  עדכן עכשיו", 0xFF16A34A.toInt(), 0xFF0891B2.toInt()) { startUpdate() }
+            addView(updateBtn)
+        }
+        root.addView(updateCard)
 
         // Level ring
         ring = LevelRing(this)
@@ -131,7 +164,55 @@ class MainActivity : BaseScreen() {
             addView(small("* הקיבולת משוערת לפי מונה המטען של הסוללה; מספר מחזורים זמין באנדרואיד 14 ומעלה."))
         })
 
+        root.addView(small("גרסה ${BuildConfig.VERSION_NAME} · בודק עדכונים אוטומטית").apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(18f).toInt(), 0, 0)
+        })
+
         return ScrollView(this).apply { addView(root); setBackgroundColor(0xFF0B1020.toInt()) }
+    }
+
+    // ---------------------------------------------------------------- updates
+
+    private fun checkForUpdate() {
+        if (installing) return
+        Thread {
+            val info = Updater.fetchNewer(this)
+            runOnUiThread {
+                pendingUpdate = info
+                if (info == null) { updateCard.visibility = View.GONE; return@runOnUiThread }
+                updateTitle.text = "🎉 גרסה חדשה ${info.versionName} זמינה" +
+                    (if (info.notes.isNotBlank()) "\n${info.notes}" else "")
+                updateBtn.text = "⬇  עדכן עכשיו"
+                updateCard.visibility = View.VISIBLE
+                if (autoStartUpdate) { autoStartUpdate = false; startUpdate() }
+            }
+        }.start()
+    }
+
+    private fun startUpdate() {
+        val info = pendingUpdate ?: return
+        if (installing) return
+        if (!Updater.canInstall(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("צריך אישור חד־פעמי")
+                .setMessage("כדי שהאפליקציה תוכל להתקין את העדכון, אפשר לה \"התקנת אפליקציות לא מוכרות\" במסך הבא, וחזור לכאן.")
+                .setPositiveButton("פתח הגדרות") { _, _ -> startActivity(Updater.unknownSourcesSettings(this)) }
+                .setNegativeButton("לא עכשיו", null)
+                .show()
+            return
+        }
+        installing = true
+        updateBtn.text = "מוריד… 0%"
+        Thread {
+            try {
+                Updater.downloadAndInstall(this, info) { p -> runOnUiThread { updateBtn.text = "מוריד… $p%" } }
+                runOnUiThread { updateBtn.text = "ממתין לאישור התקנה…" }
+            } catch (e: Exception) {
+                runOnUiThread { updateBtn.text = "⚠ ההורדה נכשלה – נסה שוב" }
+            } finally {
+                installing = false
+            }
+        }.start()
     }
 
     // ---------------------------------------------------------------- data
