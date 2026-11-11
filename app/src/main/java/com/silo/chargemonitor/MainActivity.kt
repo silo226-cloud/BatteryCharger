@@ -176,6 +176,7 @@ class MainActivity : BaseScreen() {
             addView(small("* הקיבולת משוערת לפי מונה המטען של הסוללה; מספר מחזורים זמין באנדרואיד 14 ומעלה."))
         })
 
+        root.addView(button("🐞  שלח דוח תקלה", 0x33FFFFFF, 0x33FFFFFF) { sendManualReport() })
         root.addView(small("גרסה ${BuildConfig.VERSION_NAME} · בודק עדכונים אוטומטית").apply {
             gravity = Gravity.CENTER; setPadding(0, dp(18f).toInt(), 0, 0)
         })
@@ -211,6 +212,22 @@ class MainActivity : BaseScreen() {
         updateStatus.visibility = if (msg.isNullOrBlank()) View.GONE else View.VISIBLE
     }
 
+    private fun sendManualReport() {
+        val input = android.widget.EditText(this).apply { hint = "מה קרה? (לא חובה)"; minLines = 2 }
+        AlertDialog.Builder(this)
+            .setTitle("שליחת דוח תקלה")
+            .setMessage(if (RemoteLog.enabled) "הדוח יישלח עם רשימת הפעולות האחרונות באפליקציה (בלי מידע אישי)."
+                        else "שליחה אוטומטית לא מוגדרת בגרסה הזו.")
+            .setView(input)
+            .setPositiveButton("שלח") { _, _ ->
+                val text = input.text.toString().ifBlank { "(ללא תיאור)" }
+                RemoteLog.report(this, "דוח מהמשתמש: ${text.take(60)}", text, "manual")
+                android.widget.Toast.makeText(this, "הדוח נשלח ✓", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("ביטול", null)
+            .show()
+    }
+
     private fun checkForUpdate() {
         if (installing) return
         Thread {
@@ -224,6 +241,7 @@ class MainActivity : BaseScreen() {
                 updateCard.visibility = View.VISIBLE
                 if (awaitingPermission) {
                     awaitingPermission = false
+                    RemoteLog.event(this, "חזרה מההגדרות; canInstall=${Updater.canInstall(this)}")
                     if (Updater.canInstall(this)) { showStatus("✓ ההרשאה אושרה – מתחיל עדכון"); startUpdate() }
                     else showStatus("ההרשאה \"התקנת אפליקציות לא מוכרות\" עדיין כבויה. אפשר להשתמש ב\"הורדה ידנית\".")
                 } else if (autoStartUpdate) { autoStartUpdate = false; startUpdate() }
@@ -240,6 +258,7 @@ class MainActivity : BaseScreen() {
                 .setTitle("צריך אישור חד־פעמי")
                 .setMessage("במסך הבא הפעל את המתג \"אפשר מהמקור הזה\" / \"התקנת אפליקציות לא מוכרות\" ולחץ חזור. העדכון ימשיך לבד.")
                 .setPositiveButton("פתח הגדרות") { _, _ ->
+                    RemoteLog.event(this, "נפתחו הגדרות 'התקנת אפליקציות לא מוכרות'")
                     awaitingPermission = true
                     runCatching { startActivity(Updater.unknownSourcesSettings(this)) }
                         .onFailure { awaitingPermission = false; showStatus("לא הצלחתי לפתוח את ההגדרות. השתמש ב\"הורדה ידנית\".") }
@@ -259,6 +278,8 @@ class MainActivity : BaseScreen() {
                     showStatus("בחלון של אנדרואיד לחץ \"עדכן\" / \"התקן\". האפליקציה תיסגר ותיפתח בגרסה החדשה.")
                 }
             } catch (e: Exception) {
+                RemoteLog.report(this, "הורדת עדכון נכשלה: ${e.javaClass.simpleName}",
+                    android.util.Log.getStackTraceString(e), "update")
                 runOnUiThread {
                     installing = false
                     updateBtn.text = "⬇  נסה שוב"

@@ -33,6 +33,7 @@ jobs:
       - name: Build APK
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          ISSUES_TOKEN: ${{ secrets.ISSUES_TOKEN }}
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon

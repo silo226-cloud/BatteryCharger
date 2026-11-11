@@ -46,8 +46,10 @@ object Updater {
             notes = json.optString("notes"),
             apkUrl = "$base/${json.optString("apk", "ChargeMonitor.apk")}",
         )
+        RemoteLog.event(ctx, "בדיקת עדכון: בשרת ${info.versionName} (${info.versionCode}), מותקן ${currentVersionCode(ctx)}")
         info.takeIf { it.versionCode > currentVersionCode(ctx) }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        RemoteLog.event(ctx, "בדיקת עדכון נכשלה: ${e.javaClass.simpleName} ${e.message}")
         null
     }
 
@@ -82,6 +84,7 @@ object Updater {
             setAppPackageName(ctx.packageName)
             if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
+        RemoteLog.event(ctx, "התחלת עדכון ל־${info.versionName}; canInstall=${canInstall(ctx)}")
         val sessionId = installer.createSession(params)
         installer.openSession(sessionId).use { session ->
             val conn = open(info.apkUrl)
@@ -101,6 +104,7 @@ object Updater {
             val statusIntent = Intent(ctx, InstallStatusReceiver::class.java).setAction(ACTION_INSTALL_STATUS)
             val pi = PendingIntent.getBroadcast(ctx, sessionId, statusIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0))
+            RemoteLog.event(ctx, "ההורדה הושלמה, שולח להתקנה (session $sessionId)")
             session.commit(pi.intentSender)
         }
     }
@@ -157,12 +161,13 @@ class UpdateCheckJob : JobService() {
 class InstallStatusReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        RemoteLog.event(ctx, "תוצאת מתקין: status=$status msg=${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
                 val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
                 if (confirm == null) { fail(ctx, "מסך האישור של אנדרואיד לא התקבל"); return }
-                try { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                try { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); RemoteLog.event(ctx, "נפתח מסך אישור ההתקנה") }
                 catch (e: Exception) { fail(ctx, "אנדרואיד חסם את פתיחת מסך ההתקנה (${e.javaClass.simpleName})") }
             }
             PackageInstaller.STATUS_SUCCESS -> Updater.cancelNotification(ctx)
@@ -176,6 +181,7 @@ class InstallStatusReceiver : BroadcastReceiver() {
     }
 
     private fun fail(ctx: Context, msg: String) {
+        RemoteLog.report(ctx, "עדכון נכשל: ${msg.take(80)}", msg, "update")
         ctx.getSharedPreferences("updater", Context.MODE_PRIVATE).edit().putString("lastError", msg).apply()
         ctx.sendBroadcast(Intent(Updater.ACTION_INSTALL_STATUS + ".FAILED").setPackage(ctx.packageName).putExtra("msg", msg))
     }

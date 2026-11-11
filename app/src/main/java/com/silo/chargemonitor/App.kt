@@ -21,12 +21,26 @@ import kotlin.system.exitProcess
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
+        if (!isCrashProcess()) {
+            val p = getSharedPreferences("remote_log", MODE_PRIVATE)
+            val last = p.getInt("lastVersionCode", 0)
+            if (last != BuildConfig.VERSION_CODE) {
+                RemoteLog.event(this, if (last == 0) "הותקנה גרסה ${BuildConfig.VERSION_NAME}"
+                    else "עודכן מקוד $last לגרסה ${BuildConfig.VERSION_NAME}")
+                p.edit().putInt("lastVersionCode", BuildConfig.VERSION_CODE).apply()
+            }
+            RemoteLog.event(this, "האפליקציה נפתחה")
+            Thread { RemoteLog.flush(this) }.start()
+        }
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, e ->
             try {
                 val sw = StringWriter(); e.printStackTrace(PrintWriter(sw))
                 val report = "גרסה ${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · " +
                     "${Build.MANUFACTURER} ${Build.MODEL}\n\n$sw"
+                val where = e.stackTrace.firstOrNull { it.className.startsWith("com.silo") }
+                    ?.let { " @ ${it.fileName}:${it.lineNumber}" } ?: ""
+                RemoteLog.enqueue(this, "קריסה: ${e.javaClass.simpleName}$where", sw.toString(), "crash")
                 startActivity(Intent(this, CrashActivity::class.java)
                     .putExtra("report", report)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
@@ -36,6 +50,9 @@ class App : Application() {
             }
         }
     }
+
+    private fun isCrashProcess() =
+        (if (Build.VERSION.SDK_INT >= 28) getProcessName() else "").endsWith(":crash")
 }
 
 /** Runs in its own process, so it still works after the main app crashed. */
@@ -48,7 +65,8 @@ class CrashActivity : Activity() {
             orientation = LinearLayout.VERTICAL; setPadding(pad, pad * 2, pad, pad); setBackgroundColor(0xFF0B1020.toInt())
         }
         root.addView(TextView(this).apply {
-            text = "😕 האפליקציה נתקלה בשגיאה\nצלם את המסך או לחץ \"העתק\" ושלח לפיתוח"
+            text = if (RemoteLog.enabled) "😕 האפליקציה נתקלה בשגיאה\nהדוח נשלח אוטומטית לפיתוח ✓"
+                   else "😕 האפליקציה נתקלה בשגיאה\nצלם את המסך או לחץ \"העתק\" ושלח לפיתוח"
             textSize = 18f; setTextColor(Color.WHITE)
         })
         root.addView(Button(this).apply {
@@ -62,6 +80,7 @@ class CrashActivity : Activity() {
             text = report; textSize = 11f; setTextColor(0xFFFCA5A5.toInt()); setTextIsSelectable(true)
             textDirection = TextView.TEXT_DIRECTION_LTR
         })
+        Thread { RemoteLog.flush(this) }.start()
         setContentView(ScrollView(this).apply { addView(root); setBackgroundColor(0xFF0B1020.toInt()) })
     }
 }

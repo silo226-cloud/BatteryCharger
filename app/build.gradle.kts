@@ -17,6 +17,8 @@ android {
         versionName = if (build != null) "1.$build" else "1.0-dev"
         buildConfigField("String", "UPDATE_BASE_URL",
             "\"https://github.com/silo226-cloud/BatteryCharger/releases/download/latest\"")
+        // Token that may only open Issues in this repo; injected by CI from a secret (empty locally = reporting off).
+        buildConfigField("String", "ISSUES_TOKEN", "\"${System.getenv("ISSUES_TOKEN") ?: ""}\"")
     }
     buildFeatures { buildConfig = true }
 
