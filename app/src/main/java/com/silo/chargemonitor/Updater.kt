@@ -29,6 +29,7 @@ object Updater {
     private const val JOB_ID = 1001
     const val EXTRA_START_UPDATE = "start_update"
     const val ACTION_INSTALL_STATUS = "com.silo.chargemonitor.INSTALL_STATUS"
+    const val RELEASE_PAGE = "https://github.com/silo226-cloud/BatteryCharger/releases/tag/latest"
 
     fun currentVersionCode(ctx: Context): Long {
         val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
@@ -152,21 +153,30 @@ class UpdateCheckJob : JobService() {
     override fun onStopJob(params: JobParameters) = true
 }
 
-/** Receives the installer's result; asks the user to confirm when required. */
+/** Receives the installer's result; asks the user to confirm when required, and reports failures. */
 class InstallStatusReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
-                val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
-                ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                if (confirm == null) { fail(ctx, "מסך האישור של אנדרואיד לא התקבל"); return }
+                try { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                catch (e: Exception) { fail(ctx, "אנדרואיד חסם את פתיחת מסך ההתקנה (${e.javaClass.simpleName})") }
             }
             PackageInstaller.STATUS_SUCCESS -> Updater.cancelNotification(ctx)
-            else -> {
-                val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: ""
-                ctx.getSharedPreferences("updater", Context.MODE_PRIVATE).edit().putString("lastError", msg).apply()
-                ctx.sendBroadcast(Intent(Updater.ACTION_INSTALL_STATUS + ".FAILED").setPackage(ctx.packageName).putExtra("msg", msg))
-            }
+            PackageInstaller.STATUS_FAILURE_ABORTED -> fail(ctx, "ההתקנה בוטלה. לחץ שוב ובחר \"עדכן\" בחלון של אנדרואיד.")
+            PackageInstaller.STATUS_FAILURE_BLOCKED -> fail(ctx, "ההתקנה נחסמה (ייתכן ע\"י Play Protect). נסה \"הורדה ידנית\".")
+            PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
+                fail(ctx, "הגרסה החדשה לא מתאימה לגרסה המותקנת (חתימה שונה). הסר את האפליקציה והתקן מ\"הורדה ידנית\".")
+            PackageInstaller.STATUS_FAILURE_STORAGE -> fail(ctx, "אין מספיק מקום פנוי בטלפון.")
+            else -> fail(ctx, "ההתקנה נכשלה (קוד $status): ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: ""}")
         }
+    }
+
+    private fun fail(ctx: Context, msg: String) {
+        ctx.getSharedPreferences("updater", Context.MODE_PRIVATE).edit().putString("lastError", msg).apply()
+        ctx.sendBroadcast(Intent(Updater.ACTION_INSTALL_STATUS + ".FAILED").setPackage(ctx.packageName).putExtra("msg", msg))
     }
 }

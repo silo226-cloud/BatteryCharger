@@ -36,8 +36,12 @@ class MainActivity : BaseScreen() {
     private lateinit var updateCard: LinearLayout
     private lateinit var updateTitle: TextView
     private lateinit var updateBtn: TextView
+    private lateinit var updateStatus: TextView
     private var pendingUpdate: UpdateInfo? = null
+    private var installStartedAt = 0L
     private var installing = false
+        get() = field && SystemClock.elapsedRealtime() - installStartedAt < 90_000   // stale after 90 s
+        set(v) { field = v; if (v) installStartedAt = SystemClock.elapsedRealtime() }
     private var autoStartUpdate = false
 
     // Charging-session stats (reset each time the charger is plugged in)
@@ -99,8 +103,13 @@ class MainActivity : BaseScreen() {
         updateCard = card(0xFF7C2D12.toInt(), 0xFF9D174D.toInt()).apply {
             visibility = View.GONE
             updateTitle = text("", 16f, Color.WHITE, bold = true); addView(updateTitle)
+            updateStatus = text("", 13f, 0xFFFDE68A.toInt()).apply { visibility = View.GONE; setPadding(0, dp(6f).toInt(), 0, 0) }
+            addView(updateStatus)
             updateBtn = button("⬇  עדכן עכשיו", 0xFF16A34A.toInt(), 0xFF0891B2.toInt()) { startUpdate() }
             addView(updateBtn)
+            addView(button("🌐  הורדה ידנית מהדפדפן", 0x33FFFFFF, 0x33FFFFFF) {
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Updater.RELEASE_PAGE)))
+            })
         }
         root.addView(updateCard)
 
@@ -176,6 +185,32 @@ class MainActivity : BaseScreen() {
 
     // ---------------------------------------------------------------- updates
 
+    private var awaitingPermission = false
+    private var lastStatus: String? = null
+
+    private val installFailed = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: Intent) {
+            installing = false
+            showStatus(i.getStringExtra("msg") ?: "ההתקנה נכשלה")
+            updateBtn.text = "⬇  נסה שוב"
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val f = android.content.IntentFilter(Updater.ACTION_INSTALL_STATUS + ".FAILED")
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(installFailed, f, RECEIVER_NOT_EXPORTED)
+        else registerReceiver(installFailed, f)
+    }
+
+    override fun onStop() { runCatching { unregisterReceiver(installFailed) }; super.onStop() }
+
+    private fun showStatus(msg: String?) {
+        lastStatus = msg
+        updateStatus.text = msg ?: ""
+        updateStatus.visibility = if (msg.isNullOrBlank()) View.GONE else View.VISIBLE
+    }
+
     private fun checkForUpdate() {
         if (installing) return
         Thread {
@@ -183,11 +218,16 @@ class MainActivity : BaseScreen() {
             runOnUiThread {
                 pendingUpdate = info
                 if (info == null) { updateCard.visibility = View.GONE; return@runOnUiThread }
-                updateTitle.text = "🎉 גרסה חדשה ${info.versionName} זמינה" +
+                updateTitle.text = "🎉 גרסה חדשה ${info.versionName} זמינה (מותקנת: ${BuildConfig.VERSION_NAME})" +
                     (if (info.notes.isNotBlank()) "\n${info.notes}" else "")
                 updateBtn.text = "⬇  עדכן עכשיו"
                 updateCard.visibility = View.VISIBLE
-                if (autoStartUpdate) { autoStartUpdate = false; startUpdate() }
+                if (awaitingPermission) {
+                    awaitingPermission = false
+                    if (Updater.canInstall(this)) { showStatus("✓ ההרשאה אושרה – מתחיל עדכון"); startUpdate() }
+                    else showStatus("ההרשאה \"התקנת אפליקציות לא מוכרות\" עדיין כבויה. אפשר להשתמש ב\"הורדה ידנית\".")
+                } else if (autoStartUpdate) { autoStartUpdate = false; startUpdate() }
+                else showStatus(lastStatus)
             }
         }.start()
     }
@@ -198,22 +238,32 @@ class MainActivity : BaseScreen() {
         if (!Updater.canInstall(this)) {
             AlertDialog.Builder(this)
                 .setTitle("צריך אישור חד־פעמי")
-                .setMessage("כדי שהאפליקציה תוכל להתקין את העדכון, אפשר לה \"התקנת אפליקציות לא מוכרות\" במסך הבא, וחזור לכאן.")
-                .setPositiveButton("פתח הגדרות") { _, _ -> startActivity(Updater.unknownSourcesSettings(this)) }
+                .setMessage("במסך הבא הפעל את המתג \"אפשר מהמקור הזה\" / \"התקנת אפליקציות לא מוכרות\" ולחץ חזור. העדכון ימשיך לבד.")
+                .setPositiveButton("פתח הגדרות") { _, _ ->
+                    awaitingPermission = true
+                    runCatching { startActivity(Updater.unknownSourcesSettings(this)) }
+                        .onFailure { awaitingPermission = false; showStatus("לא הצלחתי לפתוח את ההגדרות. השתמש ב\"הורדה ידנית\".") }
+                }
                 .setNegativeButton("לא עכשיו", null)
                 .show()
             return
         }
         installing = true
+        showStatus("מוריד את גרסה ${info.versionName}…")
         updateBtn.text = "מוריד… 0%"
         Thread {
             try {
                 Updater.downloadAndInstall(this, info) { p -> runOnUiThread { updateBtn.text = "מוריד… $p%" } }
-                runOnUiThread { updateBtn.text = "ממתין לאישור התקנה…" }
+                runOnUiThread {
+                    updateBtn.text = "⏳ פותח מסך התקנה…"
+                    showStatus("בחלון של אנדרואיד לחץ \"עדכן\" / \"התקן\". האפליקציה תיסגר ותיפתח בגרסה החדשה.")
+                }
             } catch (e: Exception) {
-                runOnUiThread { updateBtn.text = "⚠ ההורדה נכשלה – נסה שוב" }
-            } finally {
-                installing = false
+                runOnUiThread {
+                    installing = false
+                    updateBtn.text = "⬇  נסה שוב"
+                    showStatus("ההורדה נכשלה: ${e.message ?: e.javaClass.simpleName}")
+                }
             }
         }.start()
     }
