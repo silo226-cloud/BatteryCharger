@@ -85,7 +85,10 @@ class MainActivity : BaseScreen() {
         }
 
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        header.addView(text("⚡ מד טעינה", 26f, Color.WHITE, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
+        val titleCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        titleCol.addView(text("⚡ מד טעינה", 26f, Color.WHITE, bold = true))
+        titleCol.addView(text("גרסה ${BuildConfig.VERSION_NAME}", 13f, 0xFF7DD3FC.toInt(), bold = true))
+        header.addView(titleCol, LinearLayout.LayoutParams(0, -2, 1f))
         chip = text("", 13f, Color.WHITE, bold = true).apply {
             val p = dp(10f).toInt(); setPadding(p, p / 2, p, p / 2)
         }
