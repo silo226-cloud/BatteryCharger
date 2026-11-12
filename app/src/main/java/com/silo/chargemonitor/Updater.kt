@@ -29,6 +29,8 @@ object Updater {
     private const val JOB_ID = 1001
     const val EXTRA_START_UPDATE = "start_update"
     const val ACTION_INSTALL_STATUS = "com.silo.chargemonitor.INSTALL_STATUS"
+    /** Marker message: the OS blocked the in-app self update (e.g. Samsung Auto Blocker). */
+    const val SELF_UPDATE_BLOCKED = "SELF_UPDATE_BLOCKED"
     const val RELEASE_PAGE = "https://github.com/silo226-cloud/BatteryCharger/releases/tag/latest"
 
     fun currentVersionCode(ctx: Context): Long {
@@ -162,7 +164,14 @@ class UpdateCheckJob : JobService() {
 class InstallStatusReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        val sysMsg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
         RemoteLog.event(ctx, "תוצאת מתקין: status=$status msg=${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
+        // Samsung Auto Blocker (and similar OEM policies) reject self-updates of sideloaded apps
+        // immediately, without showing any screen: "Self update is blocked by unknown source package".
+        if ((status == PackageInstaller.STATUS_FAILURE_ABORTED || status == PackageInstaller.STATUS_FAILURE_BLOCKED) &&
+            sysMsg.contains("blocked", ignoreCase = true) && sysMsg.contains("source", ignoreCase = true)) {
+            fail(ctx, Updater.SELF_UPDATE_BLOCKED); return
+        }
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
@@ -182,7 +191,8 @@ class InstallStatusReceiver : BroadcastReceiver() {
     }
 
     private fun fail(ctx: Context, msg: String) {
-        RemoteLog.report(ctx, "עדכון נכשל: ${msg.take(80)}", msg, "update")
+        if (msg == Updater.SELF_UPDATE_BLOCKED) RemoteLog.event(ctx, "עדכון עצמי נחסם (Auto Blocker) – הוצגה הסבר למשתמש")
+        else RemoteLog.report(ctx, "עדכון נכשל: ${msg.take(80)}", msg, "update")
         ctx.getSharedPreferences("updater", Context.MODE_PRIVATE).edit().putString("lastError", msg).apply()
         ctx.sendBroadcast(Intent(Updater.ACTION_INSTALL_STATUS + ".FAILED").setPackage(ctx.packageName).putExtra("msg", msg))
     }

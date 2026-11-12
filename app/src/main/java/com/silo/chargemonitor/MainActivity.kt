@@ -196,8 +196,9 @@ class MainActivity : BaseScreen() {
     private val installFailed = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: android.content.Context, i: Intent) {
             installing = false
-            showStatus(i.getStringExtra("msg") ?: "ההתקנה נכשלה")
             updateBtn.text = "⬇  נסה שוב"
+            val msg = i.getStringExtra("msg") ?: "ההתקנה נכשלה"
+            if (msg == Updater.SELF_UPDATE_BLOCKED) showSelfUpdateBlocked() else showStatus(msg)
         }
     }
 
@@ -209,6 +210,33 @@ class MainActivity : BaseScreen() {
     }
 
     override fun onStop() { runCatching { unregisterReceiver(installFailed) }; super.onStop() }
+
+    /** Samsung Auto Blocker (or a similar policy) refused the in-app update. */
+    private fun showSelfUpdateBlocked() {
+        showStatus("🛡 סמסונג חסמה את העדכון (Auto Blocker). כבה אותו זמנית ולחץ \"נסה שוב\", או הורד דרך הדפדפן.")
+        AlertDialog.Builder(this)
+            .setTitle("🛡 העדכון נחסם ע״י Auto Blocker")
+            .setMessage("ההגנה של סמסונג חוסמת אפליקציות שהותקנו מחוץ לחנות מלעדכן את עצמן.\n\n" +
+                "• אפשרות 1: כבה את Auto Blocker (הגדרות ← אבטחה ופרטיות ← Auto Blocker), חזור ולחץ \"נסה שוב\". אפשר להדליק אותו שוב אחרי העדכון.\n\n" +
+                "• אפשרות 2: הורד את הגרסה דרך הדפדפן והתקן כרגיל.")
+            .setPositiveButton("פתח הגדרות אבטחה") { _, _ -> openSecuritySettings() }
+            .setNeutralButton("הורד בדפדפן") { _, _ ->
+                RemoteLog.event(this, "נבחרה הורדה בדפדפן אחרי חסימה")
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Updater.RELEASE_PAGE)))
+            }
+            .setNegativeButton("סגור", null)
+            .show()
+    }
+
+    private fun openSecuritySettings() {
+        RemoteLog.event(this, "נפתחו הגדרות אבטחה (Auto Blocker)")
+        val candidates = listOf(
+            Intent().setClassName("com.android.settings", "com.android.settings.Settings\$SecurityDashboardActivity"),
+            Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS),
+            Intent(android.provider.Settings.ACTION_SETTINGS),
+        )
+        for (i in candidates) if (runCatching { startActivity(i) }.isSuccess) return
+    }
 
     private fun showStatus(msg: String?) {
         lastStatus = msg
