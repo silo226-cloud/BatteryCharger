@@ -16,12 +16,13 @@ data class CableResult(
     val levelAtTest: Int? = null,
     val data: Boolean? = null,          // true = carries data, false = charge only
     val dataDetail: String? = null,
+    val maxTempC: Double? = null,
     val testedAt: Long = System.currentTimeMillis(),
 )
 
 /** Saved cable results, one entry per cable name (latest measurement wins, per part). */
-class CableStore(ctx: Context) {
-    private val p = ctx.getSharedPreferences("cables", Context.MODE_PRIVATE)
+class CableStore(ctx: Context, prefsName: String = "cables") {
+    private val p = ctx.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 
     fun all(): List<CableResult> {
         val arr = JSONArray(p.getString("list", "[]"))
@@ -42,6 +43,7 @@ class CableStore(ctx: Context) {
             disconnects = r.disconnects ?: old.disconnects, dips = r.dips ?: old.dips,
             chargerMaxW = r.chargerMaxW ?: old.chargerMaxW, levelAtTest = r.levelAtTest ?: old.levelAtTest,
             data = r.data ?: old.data, dataDetail = r.dataDetail ?: old.dataDetail,
+            maxTempC = r.maxTempC ?: old.maxTempC,
             testedAt = r.testedAt,
         )
         val list = all().filter { it.name != r.name } + merged
@@ -59,6 +61,7 @@ class CableStore(ctx: Context) {
         r.disconnects?.let { put("disconnects", it) }; r.dips?.let { put("dips", it) }
         r.chargerMaxW?.let { put("chargerMaxW", it) }; r.levelAtTest?.let { put("level", it) }
         r.data?.let { put("data", it) }; r.dataDetail?.let { put("dataDetail", it) }
+        r.maxTempC?.let { put("maxTempC", it) }
     }
 
     private fun fromJson(o: JSONObject) = CableResult(
@@ -72,10 +75,22 @@ class CableStore(ctx: Context) {
         levelAtTest = if (o.has("level")) o.getInt("level") else null,
         data = if (o.has("data")) o.getBoolean("data") else null,
         dataDetail = o.optString("dataDetail").ifBlank { null },
+        maxTempC = o.optDouble("maxTempC").takeUnless { it.isNaN() },
         testedAt = o.optLong("testedAt", 0),
     )
 
     companion object {
+        /**
+         * Grade for wireless pads, from power reaching the battery. Wireless loses part of the
+         * pad's rated power to heat, so a 15 W pad typically delivers about 10-12 W to the battery.
+         */
+        fun wirelessGrade(avgW: Double): Pair<String, Int> = when {
+            avgW >= 10 -> "🚀 מהירה (מטען 15W / Qi2)" to 0xFF4ADE80.toInt()
+            avgW >= 6.5 -> "✅ טובה (מטען 10W)" to 0xFFA3E635.toInt()
+            avgW >= 4.5 -> "🟡 רגילה (מטען 7.5W)" to 0xFFFACC15.toInt()
+            else -> "🔴 איטית (5W או לא ממורכז)" to 0xFFF87171.toInt()
+        }
+
         /** Grade from the steady average power (W) measured into the phone. */
         fun grade(avgW: Double): Pair<String, Int> = when {
             avgW >= 25 -> "🚀 מצוין – טעינה מהירה (3A ומעלה)" to 0xFF4ADE80.toInt()

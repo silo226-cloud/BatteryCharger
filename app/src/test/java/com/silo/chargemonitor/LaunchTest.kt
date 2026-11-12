@@ -82,6 +82,40 @@ class LaunchTest {
         org.junit.Assert.assertFalse(MonitorService.isEnabled(a))
     }
 
+    @Test fun wirelessPadTestAndPowerShare() {
+        val ctx = ApplicationProvider.getApplicationContext<android.app.Application>()
+        fun battery(plugged: Int, status: Int) = ctx.sendStickyBroadcast(Intent(Intent.ACTION_BATTERY_CHANGED).apply {
+            putExtra(BatteryManager.EXTRA_LEVEL, 50); putExtra(BatteryManager.EXTRA_SCALE, 100)
+            putExtra(BatteryManager.EXTRA_STATUS, status); putExtra(BatteryManager.EXTRA_PLUGGED, plugged)
+            putExtra(BatteryManager.EXTRA_VOLTAGE, 4000); putExtra(BatteryManager.EXTRA_TEMPERATURE, 330)
+        })
+        val bm = org.robolectric.Shadows.shadowOf(ctx.getSystemService(BatteryManager::class.java))
+        battery(BatteryManager.BATTERY_PLUGGED_WIRELESS, BatteryManager.BATTERY_STATUS_CHARGING)
+        bm.setIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW, -2_500_000)   // 10 W
+        val c = Robolectric.buildActivity(WirelessActivity::class.java).setup()
+        val a = c.get()
+        val views = a.window.decorView.findViewsByType(android.widget.TextView::class.java)
+        a.window.decorView.findViewsByType(android.widget.AutoCompleteTextView::class.java).first().setText("משטח")
+        views.first { it.text.toString().contains("התחל מבחן משטח") }.performClick()
+        repeat(65) { org.robolectric.shadows.ShadowLooper.idleMainLooper(1, java.util.concurrent.TimeUnit.SECONDS) }
+        val pad = CableStore(ctx, "pads").get("משטח · עם כיסוי")
+        org.junit.Assert.assertNotNull(pad)
+        org.junit.Assert.assertEquals(10.0, pad!!.avgW!!, 0.3)
+
+        // PowerShare: 1 W baseline drain, then 4 W while sharing -> ~3 W given out
+        battery(0, BatteryManager.BATTERY_STATUS_DISCHARGING)
+        bm.setIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW, 250_000)
+        a.window.decorView.findViewsByType(android.widget.TextView::class.java)
+            .first { it.text.toString().contains("התחל מדידת PowerShare") }.performClick()
+        repeat(31) { org.robolectric.shadows.ShadowLooper.idleMainLooper(1, java.util.concurrent.TimeUnit.SECONDS) }
+        bm.setIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW, 1_000_000)
+        repeat(20) { org.robolectric.shadows.ShadowLooper.idleMainLooper(1, java.util.concurrent.TimeUnit.SECONDS) }
+        val out = a.window.decorView.findViewsByType(android.widget.TextView::class.java)
+            .map { it.text.toString() }.first { it.startsWith("≈") }
+        org.junit.Assert.assertTrue("estimate shown: $out", out.contains("3.0"))
+        c.pause().stop().destroy()
+    }
+
     @Test fun powerBankActivityStarts() {
         val c = Robolectric.buildActivity(PowerBankActivity::class.java).setup()
         val v = c.get().window.decorView

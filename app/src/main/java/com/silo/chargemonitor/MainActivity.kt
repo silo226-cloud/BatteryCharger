@@ -143,6 +143,9 @@ class MainActivity : BaseScreen() {
         root.addView(button("🔌  בדיקת כבל – מהירות ונתונים  ›", 0xFF0891B2.toInt(), 0xFF16A34A.toInt()) {
             startActivity(android.content.Intent(this, CableTestActivity::class.java))
         })
+        root.addView(button("📡  טעינה אלחוטית ו־PowerShare  ›", 0xFFDB2777.toInt(), 0xFF7C3AED.toInt()) {
+            startActivity(android.content.Intent(this, WirelessActivity::class.java))
+        })
 
         // Power in
         root.addView(card(0xFF10243A.toInt(), 0xFF0E3B3F.toInt()).apply {
