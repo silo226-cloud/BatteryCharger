@@ -124,6 +124,9 @@ class MainActivity : BaseScreen() {
         root.addView(button("🔋  בדיקת בריאות פאוור בנק  ›", 0xFF7C3AED.toInt(), 0xFF2563EB.toInt()) {
             startActivity(android.content.Intent(this, PowerBankActivity::class.java))
         })
+        root.addView(button("🔌  בדיקת כבל – מהירות ונתונים  ›", 0xFF0891B2.toInt(), 0xFF16A34A.toInt()) {
+            startActivity(android.content.Intent(this, CableTestActivity::class.java))
+        })
 
         // Power in
         root.addView(card(0xFF10243A.toInt(), 0xFF0E3B3F.toInt()).apply {

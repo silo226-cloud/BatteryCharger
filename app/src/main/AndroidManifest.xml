@@ -30,6 +30,11 @@
             android:exported="false"
             android:process=":crash" />
         <activity
+            android:name=".CableTestActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".PowerBankActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
