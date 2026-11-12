@@ -113,10 +113,11 @@ object Updater {
 
     fun schedule(ctx: Context) {
         val js = ctx.getSystemService(JobScheduler::class.java)
-        if (js.getPendingJob(JOB_ID) != null) return
+        val interval = 15 * 60 * 1000L                   // Android's minimum period; only a tiny JSON is fetched
+        if (js.getPendingJob(JOB_ID)?.intervalMillis == interval) return   // reschedules older 6-hour jobs
         js.schedule(JobInfo.Builder(JOB_ID, ComponentName(ctx, UpdateCheckJob::class.java))
             .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-            .setPeriodic(6 * 60 * 60 * 1000L)          // every 6 hours
+            .setPeriodic(interval)
             .setPersisted(true)                          // survives reboot
             .build())
     }

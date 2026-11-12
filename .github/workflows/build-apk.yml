@@ -46,7 +46,7 @@ jobs:
           jq -n \
             --argjson code $((100 + GITHUB_RUN_NUMBER)) \
             --arg name "1.$GITHUB_RUN_NUMBER" \
-            --arg notes "$(printf '%s' "$COMMIT_MSG" | head -n 1)" \
+            --arg notes "$( (printf '%s' "${COMMIT_MSG:-$(git log -1 --format=%s)}") | head -n 1)" \
             '{versionCode: $code, versionName: $name, notes: $notes, apk: "ChargeMonitor.apk"}' > version.json
           cat version.json
 

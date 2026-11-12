@@ -73,11 +73,15 @@ class MainActivity : BaseScreen() {
         if (intent.getBooleanExtra(Updater.EXTRA_START_UPDATE, false)) autoStartUpdate = true
     }
 
+    private val updatePoll = object : Runnable {
+        override fun run() { checkForUpdate(); handler.postDelayed(this, 5 * 60 * 1000L) }   // every 5 min while open
+    }
+
     override fun onResume() {
         super.onResume(); handler.post(tick)
-        checkForUpdate()
+        handler.post(updatePoll)
     }
-    override fun onPause() { handler.removeCallbacks(tick); super.onPause() }
+    override fun onPause() { handler.removeCallbacks(tick); handler.removeCallbacks(updatePoll); super.onPause() }
 
     // ---------------------------------------------------------------- UI
 
