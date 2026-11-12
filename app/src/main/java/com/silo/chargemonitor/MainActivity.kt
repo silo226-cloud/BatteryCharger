@@ -45,12 +45,6 @@ class MainActivity : BaseScreen() {
     private var autoStartUpdate = false
 
     // Charging-session stats (reset each time the charger is plugged in)
-    private var wasCharging = false
-    private var sessionStart = 0L
-    private var sessionStartLevel = 0f
-    private var energyWh = 0.0
-    private var peakW = 0f
-    private var lastTick = 0L
 
     private val tick = object : Runnable {
         override fun run() { refresh(); handler.postDelayed(this, 1000) }
@@ -62,10 +56,32 @@ class MainActivity : BaseScreen() {
         setContentView(buildUi())
         autoStartUpdate = intent.getBooleanExtra(Updater.EXTRA_START_UPDATE, false)
         runCatching { Updater.schedule(this) }   // never let the update scheduler stop the app
+        MonitorService.start(this)                 // keep monitoring in the background
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) { confirmExit() }
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
         }
+    }
+
+    @Deprecated("Used below Android 13")
+    override fun onBackPressed() = confirmExit()
+
+    /** Back on the main screen: ask whether to close the app or keep it running in the background. */
+    private fun confirmExit() {
+        AlertDialog.Builder(this)
+            .setTitle("לסגור את האפליקציה?")
+            .setMessage("\"סגור\" עוצר גם את המעקב ברקע ואת ההתראה.\n\"השאר ברקע\" ממשיך למדוד ולהציג את מצב הטעינה בהתראה.")
+            .setPositiveButton("סגור") { _, _ ->
+                MonitorService.exitCompletely(this)
+                finishAndRemoveTask()
+            }
+            .setNeutralButton("השאר ברקע") { _, _ -> moveTaskToBack(true) }
+            .setNegativeButton("ביטול", null)
+            .show()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -330,15 +346,8 @@ class MainActivity : BaseScreen() {
         val s = reader.read() ?: return
         val now = SystemClock.elapsedRealtime()
 
-        if (s.isCharging && !wasCharging) {
-            sessionStart = now; sessionStartLevel = s.levelPct; energyWh = 0.0; peakW = 0f
-        }
+        ChargeSession.update(s, now)
         val power = s.powerW ?: 0f
-        if (s.isCharging && lastTick > 0 && power > 0) {
-            energyWh += power * (now - lastTick) / 3_600_000.0
-            peakW = max(peakW, power)
-        }
-        wasCharging = s.isCharging; lastTick = now
 
         // Status chip
         val (chipText, chipColor) = when {
@@ -388,12 +397,12 @@ class MainActivity : BaseScreen() {
         // Session
         if (s.isCharging) {
             set("ttf", if (s.isFull) "מלא" else s.timeToFullMs?.let { fmtDuration(it) } ?: "מחשב…", 0xFF7DD3FC.toInt())
-            val dur = now - sessionStart
+            val dur = now - ChargeSession.startedAt
             set("duration", fmtDuration(dur))
-            val added = s.levelPct - sessionStartLevel
+            val added = s.levelPct - ChargeSession.startLevel
             set("added", String.format("+%.0f%%", max(added, 0f)), 0xFF4ADE80.toInt())
-            set("energy", String.format("%.2f Wh", energyWh))
-            set("peak", String.format("%.1f W", peakW), 0xFFF472B6.toInt())
+            set("energy", String.format("%.2f Wh", ChargeSession.energyWh))
+            set("peak", String.format("%.1f W", ChargeSession.peakW), 0xFFF472B6.toInt())
             set("rate", if (dur > 60_000) String.format("%.2f", added / (dur / 60_000f)) else "…")
         } else {
             listOf("ttf", "duration", "added", "energy", "peak", "rate").forEach { set(it, "—") }

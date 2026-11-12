@@ -13,6 +13,20 @@ import android.widget.TextView
 abstract class BaseScreen : Activity() {
     protected val values = HashMap<String, TextView>()
 
+    // "Close app" (from the dialog or the notification) closes every open screen.
+    private val closeAll = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: android.content.Intent) { finishAndRemoveTask() }
+    }
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        val f = android.content.IntentFilter(MonitorService.ACTION_STOP)
+        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(closeAll, f, RECEIVER_NOT_EXPORTED)
+        else registerReceiver(closeAll, f)
+    }
+
+    override fun onDestroy() { runCatching { unregisterReceiver(closeAll) }; super.onDestroy() }
+
     protected fun card(c1: Int, c2: Int) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(c1, c2)).apply {

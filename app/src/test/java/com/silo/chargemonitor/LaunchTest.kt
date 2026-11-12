@@ -69,6 +69,19 @@ class LaunchTest {
         walk(this); return out
     }
 
+    @Test fun backAsksBeforeClosing() {
+        val c = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val a = c.get()
+        @Suppress("DEPRECATION") a.onBackPressed()
+        val dlg = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog()
+        org.junit.Assert.assertNotNull("exit confirmation dialog", dlg)
+        org.junit.Assert.assertFalse("activity must not close before confirming", a.isFinishing)
+        dlg.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        org.junit.Assert.assertTrue("activity closes after confirming", a.isFinishing)
+        org.junit.Assert.assertFalse(MonitorService.isEnabled(a))
+    }
+
     @Test fun powerBankActivityStarts() {
         val c = Robolectric.buildActivity(PowerBankActivity::class.java).setup()
         val v = c.get().window.decorView
